@@ -2,23 +2,27 @@ const COMMA = 44;
 const QUOTE = 34;
 const LF = 10;
 const CR = 13;
+const LITTLE_ENDIAN = new Uint8Array(Uint16Array.of(1).buffer)[0] === 1;
 
 export function run(input) {
   const text = String(input.text);
   const hasHeader = input.header === true;
   const end = text.length;
-  const delimiters = /[,\r\n]/g;
+  // Scan code units directly, then slice the original string for field values.
+  const utf16 = Buffer.from(text, 'utf16le');
+  if (!LITTLE_ENDIAN) utf16.swap16();
+  const codes = new Uint16Array(utf16.buffer, utf16.byteOffset, end);
   const escapes = /""|\r\n?|\n/g;
   const rows = [];
   const errors = [];
   let columns = null;
   let width = 0;
-  let position = text.charCodeAt(0) === 0xfeff ? 1 : 0;
+  let position = codes[0] === 0xfeff ? 1 : 0;
   let line = 1;
 
   while (position < end) {
-    const first = text.charCodeAt(position);
-    if (first === LF || (first === CR && text.charCodeAt(position + 1) === LF)) {
+    const first = codes[position];
+    if (first === LF || (first === CR && codes[position + 1] === LF)) {
       position += first === LF ? 1 : 2;
       line++;
       continue;
@@ -33,9 +37,9 @@ export function run(input) {
       let value = '';
       let closed = false;
 
-      if (text.charCodeAt(start) === QUOTE) {
+      if (codes[start] === QUOTE) {
         let quote = text.indexOf('"', start + 1);
-        while (quote !== -1 && text.charCodeAt(quote + 1) === QUOTE) {
+        while (quote !== -1 && codes[quote + 1] === QUOTE) {
           quote = text.indexOf('"', quote + 2);
         }
         if (quote === -1) {
@@ -54,14 +58,17 @@ export function run(input) {
       let keepsSuffix = false;
       let boundary;
       while (true) {
-        delimiters.lastIndex = start;
-        boundary = delimiters.test(text) ? delimiters.lastIndex - 1 : end;
+        boundary = start;
+        for (; boundary < end; boundary++) {
+          const code = codes[boundary];
+          if (code === COMMA || code === CR || code === LF) break;
+        }
         if (boundary > start) {
           value += text.slice(start, boundary);
           keepsSuffix = true;
         }
-        delimiter = text.charCodeAt(boundary);
-        if (delimiter !== CR || text.charCodeAt(boundary + 1) === LF) break;
+        delimiter = codes[boundary];
+        if (delimiter !== CR || codes[boundary + 1] === LF) break;
         errors.push({ code: 'stray_cr', line: recordLine, row });
         start = boundary + 1;
       }
